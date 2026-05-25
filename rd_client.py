@@ -88,24 +88,38 @@ class RealDebrid:
             return result.get(h, {})
         return {}
 
-    def resolve_stream(self, magnet):
+    def resolve_stream(self, magnet, timeout_sec=60):
         add = self.add_magnet(magnet)
         tid = add.get("id")
         if not tid:
             return None
 
-        for _ in range(30):
-            info = self.torrent_info(tid)
-            if info.get("status") == "waiting_files_selection":
-                self.select_all_files(tid)
-            if info.get("status") == "downloaded":
-                links = info.get("links", [])
-                if links:
-                    unrestricted = self.unrestrict_link(links[0])
-                    self.delete_torrent(tid)
-                    return unrestricted.get("download")
-                break
-            time.sleep(2)
+        waited = 0
+        while waited < timeout_sec:
+            try:
+                info = self.torrent_info(tid)
+                status = info.get("status")
 
-        self.delete_torrent(tid)
+                if status in ("magnet_error", "error", "virus"):
+                    break
+
+                if status == "waiting_files_selection":
+                    self.select_all_files(tid)
+
+                if status == "downloaded":
+                    links = info.get("links", [])
+                    if links:
+                        unrestricted = self.unrestrict_link(links[0])
+                        return unrestricted.get("download")
+                    break
+            except Exception:
+                pass
+
+            time.sleep(2)
+            waited += 2
+
+        try:
+            self.delete_torrent(tid)
+        except Exception:
+            pass
         return None
