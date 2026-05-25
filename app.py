@@ -105,57 +105,43 @@ def stream(stype, id):
     best_score, best_stream, _ = scored[0]
     log.info("Best stream: %s (score: %d)", best_stream["title"], best_score)
 
-    download_url = None
+    def format_stream(s):
+        q = parse_quality(s["title"])
+        ql = f"{q}p" if q else "??p"
+        cl = " HDR" if is_hevc(s["title"]) else ""
+        gb = s.get("size", 0) / (1024**3)
+        sl = f"{gb:.1f}GB" if gb > 0 else ""
+        ix = s.get("indexer", "?").upper()
+        n = f"⭐ {ql}{cl} | {ix} | {sl}" if sl else f"⭐ {ql}{cl} | {ix}"
+        return {
+            "name": n,
+            "description": s["title"][:100],
+            "url": url,
+            "behaviorHints": {"notWebReady": True, "bingeGroup": f"vinaglieri-{imdb_id}"},
+        }
 
-    cached_candidates = [(score, s) for score, s, c in scored if c]
-    non_cached = [(score, s) for score, s, c in scored if not c]
-
-    for score, s in cached_candidates[:5]:
+    resolved = []
+    for score, s in [(sc, st) for sc, st, c in scored if c][:5]:
         try:
-            url = rd.resolve_stream(s["magnet"], timeout_sec=15)
+            url = rd.resolve_stream(s["magnet"], timeout_sec=12)
             if url:
+                resolved.append(format_stream(s))
                 log.info("Resolved cached: %s (score: %d)", s["title"], score)
-                download_url = url
-                best_stream = s
-                break
         except Exception:
             continue
 
-    if not download_url and non_cached:
-        score, s = non_cached[0]
-        try:
-            url = rd.resolve_stream(s["magnet"], timeout_sec=25)
-            if url:
-                log.info("Resolved non-cached: %s (score: %d)", s["title"], score)
-                download_url = url
-                best_stream = s
-        except Exception:
-            pass
+    if not resolved:
+        for score, s in [(sc, st) for sc, st, c in scored if not c][:3]:
+            try:
+                url = rd.resolve_stream(s["magnet"], timeout_sec=20)
+                if url:
+                    resolved.append(format_stream(s))
+                    log.info("Resolved: %s (score: %d)", s["title"], score)
+                    break
+            except Exception:
+                continue
 
-    if not download_url:
-        return jsonify({"streams": []})
-
-    quality = parse_quality(best_stream["title"])
-    quality_label = f"{quality}p" if quality else "??p"
-    codec_label = " HDR" if is_hevc(best_stream["title"]) else ""
-    size_gb = best_stream.get("size", 0) / (1024**3)
-    size_label = f"{size_gb:.1f}GB" if size_gb > 0 else ""
-    indexer = best_stream.get("indexer", "?").upper()
-    title_short = best_stream["title"][:80]
-
-    name = f"⭐ {quality_label}{codec_label} | {indexer} | {size_label}" if size_label else f"⭐ {quality_label}{codec_label} | {indexer}"
-
-    return jsonify({
-        "streams": [{
-            "name": name,
-            "description": title_short,
-            "url": download_url,
-            "behaviorHints": {
-                "notWebReady": True,
-                "bingeGroup": f"vinaglieri-{imdb_id}",
-            }
-        }]
-    })
+    return jsonify({"streams": resolved})
 
 
 if __name__ == "__main__":
