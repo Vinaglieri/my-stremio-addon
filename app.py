@@ -133,17 +133,20 @@ def stream(stype, id):
     if not download_url:
         return jsonify({"streams": []})
 
-    quality = parse_quality(best_stream["title"]) or 1080
-    name = f"⚡ Auto"
-    if quality:
-        name += f" {quality}p"
-    if is_hevc(best_stream["title"]):
-        name += " HDR"
+    quality = parse_quality(best_stream["title"])
+    quality_label = f"{quality}p" if quality else "??p"
+    codec_label = " HDR" if is_hevc(best_stream["title"]) else ""
+    size_gb = best_stream.get("size", 0) / (1024**3)
+    size_label = f"{size_gb:.1f}GB" if size_gb > 0 else ""
+    indexer = best_stream.get("indexer", "?").upper()
+    title_short = best_stream["title"][:80]
+
+    name = f"⭐ {quality_label}{codec_label} | {indexer} | {size_label}" if size_label else f"⭐ {quality_label}{codec_label} | {indexer}"
 
     return jsonify({
         "streams": [{
             "name": name,
-            "description": best_stream["title"],
+            "description": title_short,
             "url": download_url,
             "behaviorHints": {
                 "notWebReady": True,
