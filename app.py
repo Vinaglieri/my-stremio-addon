@@ -106,17 +106,31 @@ def stream(stype, id):
     log.info("Best stream: %s (score: %d)", best_stream["title"], best_score)
 
     download_url = None
-    for score, s, cached in scored[:10]:
+
+    cached_candidates = [(score, s) for score, s, c in scored if c]
+    non_cached = [(score, s) for score, s, c in scored if not c]
+
+    for score, s in cached_candidates[:5]:
         try:
-            url = rd.resolve_stream(s["magnet"], timeout_sec=45)
+            url = rd.resolve_stream(s["magnet"], timeout_sec=15)
             if url:
-                log.info("Resolved: %s (score: %d)", s["title"], score)
+                log.info("Resolved cached: %s (score: %d)", s["title"], score)
                 download_url = url
                 best_stream = s
                 break
-        except Exception as e:
-            log.warning("Failed to resolve %s: %s", s["title"][:40], e)
+        except Exception:
             continue
+
+    if not download_url and non_cached:
+        score, s = non_cached[0]
+        try:
+            url = rd.resolve_stream(s["magnet"], timeout_sec=25)
+            if url:
+                log.info("Resolved non-cached: %s (score: %d)", s["title"], score)
+                download_url = url
+                best_stream = s
+        except Exception:
+            pass
 
     if not download_url:
         return jsonify({"streams": []})
