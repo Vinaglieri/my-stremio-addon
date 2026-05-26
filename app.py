@@ -260,21 +260,6 @@ def stream(stype, id):
 # ----------------------------------------------------------------
 # Play proxy (scrobble + redirect to RD)
 # ----------------------------------------------------------------
-@app.get("/debug/posters")
-def debug_posters():
-    recs = trakt.get_recommendations_movies(3)
-    if not recs:
-        return {"error": "no recs", "token": cache.get("trakt_access_token")[:10] if cache.get("trakt_access_token") else None}
-    items = []
-    for r in recs:
-        items.append({
-            "title": r.get("title"),
-            "has_images": "images" in r,
-            "poster_type": type(r.get("images", {}).get("poster", None)).__name__ if r.get("images", {}).get("poster", None) else "missing",
-            "poster_first": str(r.get("images", {}).get("poster", [None])[0])[:80] if isinstance(r.get("images", {}).get("poster", []), list) and r.get("images", {}).get("poster", []) else None,
-        })
-    return {"items": items}
-
 @app.get("/proxy/<imdb_id>/<rd_enc>")
 def proxy(imdb_id, rd_enc):
     try:

@@ -37,7 +37,7 @@ def _couchmoney_recs(media_type, limit=20):
     list_id = lst.get("ids", {}).get("trakt")
     if not list_id:
         return None
-    items = trakt._api(f"/users/me/lists/{list_id}/items/{media_type}s?limit={limit}")
+    items = trakt._api(f"/users/me/lists/{list_id}/items/{media_type}s?limit={limit}&extended=images")
     if not items:
         return None
     results = []
