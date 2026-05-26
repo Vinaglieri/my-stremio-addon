@@ -42,7 +42,10 @@ def manifest():
         "version": "1.1.0",
         "name": "Vinaglieri Personal",
         "description": "Trakt recommendations + rating + scrobble",
-        "resources": ["catalog", "meta"],
+        "resources": [
+            {"name": "catalog", "types": ["movie", "series"], "idPrefixes": ["tt"]},
+            {"name": "meta", "types": ["movie", "series"], "idPrefixes": ["tt"]},
+        ],
         "types": ["movie", "series"],
         "catalogs": catalogs,
     })
@@ -75,8 +78,8 @@ def meta(stype, id):
     i = m.group(1) if m else id
     links = []
     if trakt.is_authed():
-        links.append({"name": "⭐ Rate", "category": "Ratings", "url": f"{BASE}/rate/{stype}/{i}"})
-        links.append({"name": "🎬 Since you watched", "category": "Recommendations", "url": f"{BASE}/since/{stype}/{i}"})
+        links.append({"name": "Rate", "category": "Ratings", "url": f"{BASE}/rate/{stype}/{i}"})
+        links.append({"name": "Since you watched", "category": "Recommendations", "url": f"{BASE}/since/{stype}/{i}"})
     name = ""
     poster = ""
     try:
