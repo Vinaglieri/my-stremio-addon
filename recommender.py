@@ -5,6 +5,8 @@ log = logging.getLogger(__name__)
 
 COUCHMONEY_KEYWORDS = ["couchmoney", "recommended for", "since you watched", "because you"]
 
+TRAKT_TO_STREMIO = {"movie": "movie", "show": "series"}
+
 def _poster(item):
     imgs = item.get("images", {})
     for key in ("poster", "thumb"):
@@ -49,7 +51,7 @@ def _couchmoney_recs(media_type, limit=20):
             continue
         results.append({
             "id": imdb,
-            "type": media_type,
+            "type": TRAKT_TO_STREMIO.get(media_type, media_type),
             "name": m.get("title", ""),
             "year": m.get("year"),
             "poster": _poster(m),
@@ -94,7 +96,7 @@ def _to_catalog(items, media_type):
             continue
         results.append({
             "id": imdb,
-            "type": media_type,
+            "type": TRAKT_TO_STREMIO.get(media_type, media_type),
             "name": m.get("title", ""),
             "year": m.get("year"),
             "poster": _poster(m),
