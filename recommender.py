@@ -7,15 +7,15 @@ COUCHMONEY_KEYWORDS = ["couchmoney", "recommended for", "since you watched", "be
 
 def _poster(item):
     imgs = item.get("images", {})
-    poster = imgs.get("poster", {})
-    if isinstance(poster, dict):
-        return poster.get("thumb") or poster.get("full")
+    for key in ("poster", "thumb"):
+        vals = imgs.get(key, [])
+        if isinstance(vals, list) and vals:
+            url = vals[0]
+            if isinstance(url, str):
+                return url if url.startswith("http") else f"https://{url}"
     poster_path = item.get("poster_path")
     if poster_path:
         return f"https://image.tmdb.org/t/p/w342/{poster_path}"
-    tmdb_id = item.get("ids", {}).get("tmdb")
-    if tmdb_id:
-        return f"https://image.tmdb.org/t/p/w342/{tmdb_id}_poster.jpg"
     return None
 
 
