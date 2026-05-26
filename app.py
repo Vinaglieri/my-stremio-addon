@@ -41,8 +41,9 @@ def root():
    <a href='/trakt/auth'>{'Reconnect' if trakt_ok else 'Connect'}</a></p>
 <p>Real-Debrid: {'✅ Configured' if rd_ok else '❌ Not configured'}</p>
 <hr>
-<p>Manifest URL: <code>{BASE_URL}/manifest.json</code></p>
-<p>Add this URL in Stremio → Add-ons → Install from URL</p>
+<p><a href="{BASE_URL}/manifest.json" style="font-size:1.2rem">📦 Install in Stremio (Direct)</a></p>
+<p><a href="stremio://addon/install?url=https%3A%2F%2Fmy-stremio-addon-981079721173.us-central1.run.app%2Fmanifest.json" style="font-size:1.2rem">📦 Install in Stremio (Deep Link)</a></p>
+<p>Or copy: <code>{BASE_URL}/manifest.json</code></p>
 </body></html>"""
 
 @app.get("/manifest.json")
