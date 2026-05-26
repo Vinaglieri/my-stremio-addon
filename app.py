@@ -76,7 +76,50 @@ def meta(stype, id):
     links = []
     if trakt.is_authed():
         links.append({"name": "⭐ Rate", "category": "Ratings", "url": f"{BASE}/rate/{stype}/{i}"})
-    return jsonify({"meta": {"id": i, "type": stype, "links": links}})
+        links.append({"name": "🎬 Since you watched", "category": "Recommendations", "url": f"{BASE}/since/{stype}/{i}"})
+    name = ""
+    poster = ""
+    try:
+        import requests as http
+        r = http.get(f"https://v3-cinemeta.strem.io/meta/{stype}/{i}.json", timeout=5)
+        if r.status_code == 200:
+            d = r.json().get("meta", {})
+            name = d.get("name", "")
+            poster = d.get("poster", "")
+    except Exception:
+        pass
+    return jsonify({"meta": {"id": i, "type": stype, "name": name, "poster": poster, "links": links}})
+
+SINCE_PAGE = """<html><body style="font-family:sans-serif;padding:1rem;max-width:600px;margin:auto">
+<h2>🎬 Since you watched <em>{title}</em></h2>
+{items}
+<p><a href="https://app.strem.io/shell-v4.4">Back to Stremio</a></p>
+</body></html>"""
+
+@app.get("/since/<stype>/<imdb_id>")
+def since_page(stype, imdb_id):
+    title = imdb_id
+    cards = ""
+    if stype == "movie" and trakt.is_authed():
+        recs = recommender.since_watched(imdb_id)
+        try:
+            import requests as http
+            r = http.get(f"https://v3-cinemeta.strem.io/meta/{stype}/{imdb_id}.json", timeout=5)
+            if r.status_code == 200:
+                title = r.json().get("meta", {}).get("name", imdb_id)
+        except Exception:
+            pass
+        for r in recs[:8]:
+            rid = r.get("id", "")
+            rname = r.get("name", "?")
+            rposter = r.get("poster", "")
+            rurl = f"https://app.strem.io/shell-v4.4#/detail/movie/{rid}"
+            cards += f"""<div style="display:inline-block;width:120px;margin:8px;text-align:center">
+<a href="{rurl}" style="text-decoration:none;color:inherit">
+<img src="{rposter}" style="width:120px;height:180px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'">
+<div style="font-size:0.8rem;margin-top:4px">{rname}</div>
+</a></div>"""
+    return SINCE_PAGE.format(title=title, items=cards or "<p>No recommendations yet — watch and rate more!</p>")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
