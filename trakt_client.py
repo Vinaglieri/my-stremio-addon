@@ -100,10 +100,10 @@ def get_ratings():
     return _api("/sync/ratings")
 
 def get_recommendations_movies(limit=20):
-    return _api(f"/recommendations/movies?limit={limit}")
+    return _api(f"/recommendations/movies?limit={limit}&extended=images")
 
 def get_recommendations_shows(limit=20):
-    return _api(f"/recommendations/shows?limit={limit}")
+    return _api(f"/recommendations/shows?limit={limit}&extended=images")
 
 def get_user_lists():
     return _api("/users/me/lists")
