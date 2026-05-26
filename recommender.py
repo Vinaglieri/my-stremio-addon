@@ -34,89 +34,12 @@ def _couchmoney_recs(media_type, limit=20):
             continue
         results.append({
             "id": imdb,
-            "type": media_type,
-            "name": m.get("title", ""),
-            "year": m.get("year"),
-            "poster": f"https://image.tmdb.org/t/p/w342/{m.get('poster_path', '')}" if m.get("poster_path") else
-                      f"https://image.tmdb.org/t/p/w342/{m.get('tmdb', {}).get('poster_path', '')}" if m.get("tmdb", {}).get("poster_path") else None,
+            "type": "movie",
+            "name": item.get("title", ""),
+            "year": item.get("year"),
+            "poster": _poster(item, "movie"),
             "posterShape": "regular",
-            "genres": m.get("genres", []),
-            "overview": m.get("overview", ""),
+            "genres": item.get("genres", []),
+            "overview": item.get("overview", ""),
         })
-    return results
-
-def recommended_movies(limit=20):
-    couch = _couchmoney_recs("movie", limit)
-    if couch:
-        log.info("Using Couchmoney movie list (%d items)", len(couch))
-        return couch
-
-    log.info("Couchmoney not found, using Trakt API")
-    recs = trakt.get_recommendations_movies(limit)
-    if recs:
-        return _to_catalog(recs, "movie")
-    return []
-
-def recommended_shows(limit=20):
-    couch = _couchmoney_recs("show", limit)
-    if couch:
-        log.info("Using Couchmoney show list (%d items)", len(couch))
-        return couch
-
-    log.info("Couchmoney not found, using Trakt API")
-    recs = trakt.get_recommendations_shows(limit)
-    if recs:
-        return _to_catalog(recs, "show")
-    return []
-
-def _to_catalog(items, media_type):
-    results = []
-    for item in items:
-        m = item if media_type == "movie" else item.get("show", item)
-        ids = m.get("ids", {})
-        imdb = ids.get("imdb", "")
-        if not imdb:
-            continue
-        results.append({
-            "id": imdb,
-            "type": media_type,
-            "name": m.get("title", ""),
-            "year": m.get("year"),
-            "poster": f"https://image.tmdb.org/t/p/w342/{m.get('poster_path', '')}" if m.get("poster_path") else None,
-            "posterShape": "regular",
-            "genres": m.get("genres", []),
-            "overview": m.get("overview", ""),
-        })
-    return results
-
-def since_watched(movie_id):
-    couch = _couchmoney_recs("movie", 20)
-    if couch:
-        return [c for c in couch if c["id"] != movie_id][:10]
-
-    genre_stats = trakt.get_genre_stats()
-    top_genres = list(genre_stats.keys())[:3]
-    recs = trakt.get_recommendations_movies(20)
-    if not recs:
-        return []
-
-    results = []
-    for item in recs:
-        ids = item.get("ids", {})
-        imdb = ids.get("imdb", "")
-        if not imdb or imdb == movie_id:
-            continue
-        item_genres = set(item.get("genres", []))
-        overlap = item_genres & set(top_genres)
-        if overlap or not results:
-            results.append({
-                "id": imdb,
-                "type": "movie",
-                "name": item.get("title", ""),
-                "year": item.get("year"),
-                "poster": f"https://image.tmdb.org/t/p/w342/{item.get('poster_path', '')}" if item.get("poster_path") else None,
-                "posterShape": "regular",
-                "genres": item.get("genres", []),
-                "overview": item.get("overview", ""),
-            })
     return results[:10]
