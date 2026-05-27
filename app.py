@@ -45,6 +45,7 @@ def manifest():
         "resources": [
             {"name": "catalog", "types": ["movie", "series"], "idPrefixes": ["tt"]},
             {"name": "meta", "types": ["movie", "series"], "idPrefixes": ["tt"]},
+            {"name": "stream", "types": ["movie", "series"], "idPrefixes": ["tt"]},
         ],
         "types": ["movie", "series"],
         "catalogs": catalogs,
@@ -65,9 +66,9 @@ def trakt_callback():
 @app.get("/catalog/<stype>/<cid>.json")
 def catalog(stype, cid):
     if cid == "vinaglieri-recommended":
-        items = recommender.recommended_movies(20)
+        items = recommender.recommended_movies(50)
     elif cid == "vinaglieri-recommended-shows":
-        items = recommender.recommended_shows(20)
+        items = recommender.recommended_shows(50)
     else:
         items = []
     return jsonify({"metas": items})
@@ -80,18 +81,82 @@ def meta(stype, id):
     if trakt.is_authed():
         links.append({"name": "Rate", "category": "Ratings", "url": f"{BASE}/rate/{stype}/{i}"})
         links.append({"name": "Since you watched", "category": "Recommendations", "url": f"{BASE}/since/{stype}/{i}"})
-    name = ""
-    poster = ""
+    meta = {"id": i, "type": stype, "name": "", "poster": ""}
     try:
         import requests as http
         r = http.get(f"https://v3-cinemeta.strem.io/meta/{stype}/{i}.json", timeout=5)
         if r.status_code == 200:
-            d = r.json().get("meta", {})
-            name = d.get("name", "")
-            poster = d.get("poster", "")
+            d = r.json()
+            if isinstance(d.get("meta"), dict):
+                meta = d["meta"]
     except Exception:
         pass
-    return jsonify({"meta": {"id": i, "type": stype, "name": name, "poster": poster, "links": links}})
+    meta["links"] = links
+    return jsonify({"meta": meta})
+
+@app.get("/stream/<stype>/<id>.json")
+def stream(stype, id):
+    m = re.match(r'(tt\d+)', id)
+    i = m.group(1) if m else id
+    streams = []
+    if trakt.is_authed():
+        streams.append({
+            "name": "⭐ Rate on Trakt",
+            "description": "Rate this 1-10",
+            "externalUrl": f"{BASE}/rate/{stype}/{i}",
+            "behaviorHints": {"notWebReady": True},
+        })
+        streams.append({
+            "name": "🎬 Since you watched",
+            "description": "Similar recommendations",
+            "externalUrl": f"{BASE}/since/{stype}/{i}",
+            "behaviorHints": {"notWebReady": True},
+        })
+        streams.append({
+            "name": "✔️ Mark watched on Trakt",
+            "description": "Add to Trakt history",
+            "externalUrl": f"{BASE}/watched/{stype}/{i}",
+            "behaviorHints": {"notWebReady": True},
+        })
+    return jsonify({"streams": streams})
+
+RATE_PAGE = """<html><body style="font-family:sans-serif;padding:1rem;max-width:600px;margin:auto;text-align:center">
+<h2>⭐ Rate <em>{title}</em></h2>
+<p style="color:#888">Click a rating (1-10)</p>
+<div style="font-size:2rem;margin:1rem 0">
+{stars}
+</div>
+{msg}
+<p><a href="https://app.strem.io/shell-v4.4">Back to Stremio</a></p>
+</body></html>"""
+
+@app.get("/rate/<stype>/<imdb_id>")
+def rate_page(stype, imdb_id):
+    title = imdb_id
+    msg = ""
+    try:
+        import requests as http
+        r = http.get(f"https://v3-cinemeta.strem.io/meta/{stype}/{imdb_id}.json", timeout=5)
+        if r.status_code == 200:
+            d = r.json()
+            if isinstance(d.get("meta"), dict):
+                title = d["meta"].get("name", imdb_id)
+    except Exception:
+        pass
+    rating = request.args.get("rating")
+    if rating and trakt.is_authed():
+        try:
+            trakt.rate(imdb_id, int(rating))
+            msg = f"<p style='color:#4caf50'>✅ Rated {rating}/10</p>"
+        except Exception as e:
+            msg = f"<p style='color:#f44336'>❌ {e}</p>"
+    stars = "".join(
+        f'<a href="?rating={n}" style="text-decoration:none;color:'
+        f'{"#ffc107" if rating and int(rating) == n else "#555"}' \
+        f'">{n}</a> '
+        for n in range(1, 11)
+    )
+    return RATE_PAGE.format(title=title, stars=stars, msg=msg)
 
 SINCE_PAGE = """<html><body style="font-family:sans-serif;padding:1rem;max-width:600px;margin:auto">
 <h2>🎬 Since you watched <em>{title}</em></h2>
@@ -109,7 +174,9 @@ def since_page(stype, imdb_id):
             import requests as http
             r = http.get(f"https://v3-cinemeta.strem.io/meta/{stype}/{imdb_id}.json", timeout=5)
             if r.status_code == 200:
-                title = r.json().get("meta", {}).get("name", imdb_id)
+                d = r.json()
+                if isinstance(d.get("meta"), dict):
+                    title = d["meta"].get("name", imdb_id)
         except Exception:
             pass
         for r in recs[:8]:
@@ -123,6 +190,31 @@ def since_page(stype, imdb_id):
 <div style="font-size:0.8rem;margin-top:4px">{rname}</div>
 </a></div>"""
     return SINCE_PAGE.format(title=title, items=cards or "<p>No recommendations yet — watch and rate more!</p>")
+
+@app.get("/watched/<stype>/<imdb_id>")
+def watched_page(stype, imdb_id):
+    title = imdb_id
+    try:
+        import requests as http
+        r = http.get(f"https://v3-cinemeta.strem.io/meta/{stype}/{imdb_id}.json", timeout=5)
+        if r.status_code == 200:
+            d = r.json()
+            if isinstance(d.get("meta"), dict):
+                title = d["meta"].get("name", imdb_id)
+    except Exception:
+        pass
+    ok = False
+    if trakt.is_authed():
+        try:
+            trakt.mark_watched(imdb_id, stype)
+            ok = True
+        except Exception:
+            pass
+    return f"""<html><body style="font-family:sans-serif;padding:2rem;text-align:center">
+<h2>{'✅' if ok else '❌'} <em>{title}</em></h2>
+<p>{'Marked as watched on Trakt' if ok else 'Failed to mark as watched'}</p>
+<p><a href="https://app.strem.io/shell-v4.4">Back to Stremio</a></p>
+</body></html>"""
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))

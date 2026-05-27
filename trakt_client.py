@@ -99,6 +99,9 @@ def get_watched_shows():
 def get_ratings():
     return _api("/sync/ratings")
 
+def get_related_movies(imdb_id, limit=20):
+    return _api(f"/movies/{imdb_id}/related?limit={limit}&extended=images")
+
 def get_recommendations_movies(limit=20):
     return _api(f"/recommendations/movies?limit={limit}&extended=images")
 
@@ -154,6 +157,12 @@ def scrobble(imdb_id, episode=None, action="start"):
             "progress": 0,
         }
     return _api_post("/scrobble", data)
+
+def mark_watched(imdb_id, stype="movie"):
+    data = {"movies": [{"ids": {"imdb": imdb_id}, "watched_at": "now"}]}
+    if stype == "series":
+        data = {"shows": [{"ids": {"imdb": imdb_id}, "watched_at": "now"}]}
+    return _api_post("/sync/history", data)
 
 def rate(imdb_id, rating, episode=None):
     data = {"movies": [{"ids": {"imdb": imdb_id}, "rating": rating}]}
