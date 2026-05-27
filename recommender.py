@@ -123,7 +123,7 @@ def _scored_related_movies():
             "overview": d.get("overview", ""),
         }
 
-    cache.set("scored_related", json.dumps(result), ex=RELATED_CACHE_TTL)
+    cache.set("scored_related", json.dumps(result), RELATED_CACHE_TTL)
     return result
 
 
@@ -213,7 +213,7 @@ def _scored_related_shows():
             "overview": d.get("overview", ""),
         }
 
-    cache.set("scored_related_shows", json.dumps(result), ex=RELATED_CACHE_TTL)
+    cache.set("scored_related_shows", json.dumps(result), RELATED_CACHE_TTL)
     return result
 
 
