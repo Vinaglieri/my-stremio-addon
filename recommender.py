@@ -158,7 +158,84 @@ def recommended_movies(limit=50):
     return []
 
 
+def _scored_related_shows():
+    """Score all watched shows' related lists, cached."""
+    cached = cache.get("scored_related_shows")
+    if cached:
+        try:
+            return json.loads(cached)
+        except Exception:
+            pass
+
+    watched = trakt.get_watched_shows()
+    if not watched:
+        return {}
+
+    watched_imdbs = set()
+    for item in watched:
+        imdb = item.get("show", {}).get("ids", {}).get("imdb")
+        if imdb:
+            watched_imdbs.add(imdb)
+
+    scores = {}
+    details = {}
+
+    for item in watched:
+        imdb = item.get("show", {}).get("ids", {}).get("imdb")
+        if not imdb:
+            continue
+        related = trakt.get_related_shows(imdb, 10)
+        if not related:
+            continue
+        for rel in related:
+            rid = rel.get("ids", {}).get("imdb")
+            if not rid or rid in watched_imdbs:
+                continue
+            scores[rid] = scores.get(rid, 0) + 1
+            if rid not in details:
+                details[rid] = {
+                    "title": rel.get("title", ""),
+                    "year": rel.get("year"),
+                    "poster": _poster(rel),
+                    "genres": rel.get("genres", []),
+                    "overview": rel.get("overview", ""),
+                }
+
+    result = {}
+    for rid, score in scores.items():
+        d = details.get(rid, {})
+        result[rid] = {
+            "score": score,
+            "title": d.get("title", ""),
+            "year": d.get("year"),
+            "poster": d.get("poster", ""),
+            "genres": d.get("genres", []),
+            "overview": d.get("overview", ""),
+        }
+
+    cache.set("scored_related_shows", json.dumps(result), ex=RELATED_CACHE_TTL)
+    return result
+
+
 def recommended_shows(limit=50):
+    scored = _scored_related_shows()
+    if scored:
+        log.info("Using related-show scoring (%d candidates)", len(scored))
+        sorted_ids = sorted(scored.items(), key=lambda x: (-x[1]["score"], x[0]))[:limit]
+        return [
+            {
+                "id": rid,
+                "type": "series",
+                "name": d["title"],
+                "year": d["year"],
+                "poster": d["poster"],
+                "posterShape": "regular" if d.get("poster") else None,
+                "genres": d["genres"],
+                "overview": d["overview"],
+            }
+            for rid, d in sorted_ids
+        ]
+
     couch = _couchmoney_recs("show", limit)
     if couch:
         log.info("Using Couchmoney show list (%d items)", len(couch))

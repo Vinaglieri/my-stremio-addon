@@ -102,6 +102,9 @@ def get_ratings():
 def get_related_movies(imdb_id, limit=20):
     return _api(f"/movies/{imdb_id}/related?limit={limit}&extended=images")
 
+def get_related_shows(imdb_id, limit=20):
+    return _api(f"/shows/{imdb_id}/related?limit={limit}&extended=images")
+
 def get_recommendations_movies(limit=20):
     return _api(f"/recommendations/movies?limit={limit}&extended=images")
 
