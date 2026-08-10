@@ -4,6 +4,7 @@ import logging
 from flask import Flask, jsonify, request
 import simkl_client as simkl
 import recommender
+import sync_engine
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ def simkl_callback():
 
 @app.get("/catalog/<stype>/<cid>.json")
 def catalog(stype, cid):
+    sync_engine.maybe_sync()
     if cid == "vinaglieri-recommended":
         items = recommender.recommended_movies(50)
     elif cid == "vinaglieri-recommended-shows":

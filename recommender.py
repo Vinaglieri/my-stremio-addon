@@ -118,19 +118,23 @@ def _to_catalog(counts, media_type, limit):
     return items
 
 
+def _compute_catalog(get_watched, simkl_type, catalog_type, key, limit):
+    counts = _recommendation_counts(get_watched, simkl_type)
+    if not counts:
+        return []
+    log.info("Using Simkl users_recommendations (%d candidates)", len(counts))
+    items = _to_catalog(counts, catalog_type, 50)
+    if items:
+        cache.set(key, json.dumps(items), CACHE_TTL)
+    return items[:limit]
+
+
 def recommended_movies(limit=50):
     cached = _get_cached(CACHE_KEY_MOVIES)
     if cached is not None:
         log.info("Using cached movie catalog (%d items)", len(cached))
         return cached[:limit]
-    counts = _recommendation_counts(simkl.get_watched_movies, "movie")
-    if counts:
-        log.info("Using Simkl users_recommendations (%d candidates)", len(counts))
-        items = _to_catalog(counts, "movie", limit)
-        if items:
-            cache.set(CACHE_KEY_MOVIES, json.dumps(items), CACHE_TTL)
-        return items
-    return []
+    return _compute_catalog(simkl.get_watched_movies, "movie", "movie", CACHE_KEY_MOVIES, limit)
 
 
 def recommended_shows(limit=50):
@@ -138,11 +142,36 @@ def recommended_shows(limit=50):
     if cached is not None:
         log.info("Using cached show catalog (%d items)", len(cached))
         return cached[:limit]
-    counts = _recommendation_counts(simkl.get_watched_shows, "tv")
-    if counts:
-        log.info("Using Simkl users_recommendations (%d candidates)", len(counts))
-        items = _to_catalog(counts, "series", limit)
-        if items:
-            cache.set(CACHE_KEY_SHOWS, json.dumps(items), CACHE_TTL)
-        return items
-    return []
+    return _compute_catalog(simkl.get_watched_shows, "tv", "series", CACHE_KEY_SHOWS, limit)
+
+
+def rebuild():
+    """Recompute both catalogs (cache-miss path), return (movies, shows)."""
+    movies = _compute_catalog(simkl.get_watched_movies, "movie", "movie", CACHE_KEY_MOVIES, 50)
+    shows = _compute_catalog(simkl.get_watched_shows, "tv", "series", CACHE_KEY_SHOWS, 50)
+    return movies, shows
+
+
+def push_plan_to_watch(limit=50):
+    """Add top recommended titles to Simkl Plan to Watch (add-only).
+
+    Only pushes titles not already on the watchlist, so the user's
+    watching/completed/hold/dropped statuses are never overwritten.
+    """
+    for key, media_type, simkl_type in (
+        (CACHE_KEY_MOVIES, "movie", "movies"),
+        (CACHE_KEY_SHOWS, "series", "shows"),
+    ):
+        items = _get_cached(key) or []
+        imdb_ids = [it["id"] for it in items[:limit] if it.get("id")]
+        if not imdb_ids:
+            continue
+        existing = simkl.get_list_statuses(simkl_type)
+        to_add = [i for i in imdb_ids if existing.get(i) in (None, "plantowatch")]
+        if not to_add:
+            continue
+        result = simkl.add_to_list("plantowatch", {simkl_type: to_add})
+        log.info("plan-to-watch %s: %d titles", simkl_type, len(to_add))
+        if result == "unauthorized":
+            return False
+    return True
