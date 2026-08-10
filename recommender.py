@@ -46,6 +46,8 @@ def _recommendation_counts(get_watched, media_type):
     if not watched:
         return {}
 
+    expected_type = "movie" if media_type == "movie" else "tv"
+
     watched_simkl = set()
     tasks = []
     for item in watched:
@@ -72,6 +74,8 @@ def _recommendation_counts(get_watched, media_type):
             if not recs:
                 continue
             for r in recs:
+                if r.get("type") != expected_type:
+                    continue
                 rid = r.get("ids", {}).get("simkl")
                 if not rid or rid in watched_simkl:
                     continue
