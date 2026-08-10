@@ -11,6 +11,8 @@ CACHE_TTL = 86400
 CACHE_KEY_MOVIES = "recommender:catalog:movie"
 CACHE_KEY_SHOWS = "recommender:catalog:series"
 
+POOL_SIZE = 200  # deep candidate pool for plan-to-watch; catalog display still uses limit
+
 SIMKL_IMG = "https://wsrv.nl/?url=https://simkl.in"
 
 
@@ -123,7 +125,7 @@ def _compute_catalog(get_watched, simkl_type, catalog_type, key, limit):
     if not counts:
         return []
     log.info("Using Simkl users_recommendations (%d candidates)", len(counts))
-    items = _to_catalog(counts, catalog_type, 50)
+    items = _to_catalog(counts, catalog_type, POOL_SIZE)
     if items:
         cache.set(key, json.dumps(items), CACHE_TTL)
     return items[:limit]
@@ -152,26 +154,37 @@ def rebuild():
     return movies, shows
 
 
-def push_plan_to_watch(limit=50):
-    """Add top recommended titles to Simkl Plan to Watch (add-only).
+def push_plan_to_watch(target=50):
+    """Fill Simkl Plan to Watch up to `target` per type (add-only).
 
-    Only pushes titles not already on the watchlist, so the user's
-    watching/completed/hold/dropped statuses are never overwritten.
+    Scans the ranked pool (POOL_SIZE deep) and adds top untracked titles
+    until each list holds `target` items. Watching/completed/hold/dropped
+    statuses are never overwritten.
     """
     for key, media_type, simkl_type in (
         (CACHE_KEY_MOVIES, "movie", "movies"),
         (CACHE_KEY_SHOWS, "series", "shows"),
     ):
         items = _get_cached(key) or []
-        imdb_ids = [it["id"] for it in items[:limit] if it.get("id")]
-        if not imdb_ids:
+        if not items:
             continue
         existing = simkl.get_list_statuses(simkl_type)
-        to_add = [i for i in imdb_ids if existing.get(i) in (None, "plantowatch")]
+        already = sum(
+            1 for it in items
+            if it.get("id") and existing.get(it["id"]) == "plantowatch"
+        )
+        need = max(0, target - already)
+        to_add = []
+        for it in items:
+            if len(to_add) >= need:
+                break
+            sid = it.get("id")
+            if sid and existing.get(sid) is None:
+                to_add.append(sid)
         if not to_add:
             continue
         result = simkl.add_to_list("plantowatch", {simkl_type: to_add})
-        log.info("plan-to-watch %s: %d titles", simkl_type, len(to_add))
+        log.info("plan-to-watch %s: +%d titles (target %d)", simkl_type, len(to_add), target)
         if result == "unauthorized":
             return False
     return True
