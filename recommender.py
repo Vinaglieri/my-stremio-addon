@@ -3,7 +3,6 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import simkl_client as simkl
-import tmdb_client as tmdb
 import upstash_client as cache
 
 log = logging.getLogger(__name__)
@@ -11,6 +10,8 @@ log = logging.getLogger(__name__)
 CACHE_TTL = 86400
 CACHE_KEY_MOVIES = "recommender:catalog:movie"
 CACHE_KEY_SHOWS = "recommender:catalog:series"
+
+SIMKL_IMG = "https://wsrv.nl/?url=https://simkl.in"
 
 
 def _get_cached(key):
@@ -23,110 +24,98 @@ def _get_cached(key):
         return None
 
 
-def _poster(item):
-    poster_path = item.get("poster_path")
-    if poster_path:
-        return f"https://image.tmdb.org/t/p/w342/{poster_path}"
+def _simkl_poster(path):
+    if path:
+        return f"{SIMKL_IMG}/posters/{path}_m.webp&q=90"
     return None
 
 
-def _weight(seed):
-    r = seed.get("user_rating") or seed.get("rating")
-    if r and r >= 7:
-        return 3
-    if r and r >= 4:
-        return 2
-    return 1
-
-
-def _seed_imdb(item):
-    if item.get("ids", {}).get("imdb"):
-        return item["ids"]["imdb"]
+def _seed_simkl_id(item):
+    if item.get("ids", {}).get("simkl"):
+        return item["ids"]["simkl"]
     for key in ("movie", "show"):
-        if item.get(key, {}).get("ids", {}).get("imdb"):
-            return item[key]["ids"]["imdb"]
+        if item.get(key, {}).get("ids", {}).get("simkl"):
+            return item[key]["ids"]["simkl"]
     return None
 
 
-def _scored_related(tmdb_type, get_watched):
+def _recommendation_counts(get_watched, media_type):
     watched = get_watched()
     if not watched:
         return {}
 
-    watched_imdbs = set()
+    watched_simkl = set()
     tasks = []
     for item in watched:
-        imdb = _seed_imdb(item)
-        if imdb:
-            watched_imdbs.add(imdb)
-            tasks.append(item)
+        sid = _seed_simkl_id(item)
+        if sid:
+            watched_simkl.add(sid)
+            tasks.append(sid)
 
-    scores = {}
-    details = {}
+    counts = {}
 
-    def related_for(seed):
-        imdb = _seed_imdb(seed)
-        if not imdb:
-            return imdb, None
-        tid = tmdb.tmdb_id(imdb)
-        if not tid:
-            return imdb, None
-        return imdb, tmdb.related(tid, tmdb_type, 10)
+    def recs_for(sid):
+        d = simkl.detail(media_type, sid)
+        if not d:
+            return None
+        return d.get("users_recommendations", [])
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-        future_map = {executor.submit(related_for, seed): seed for seed in tasks}
+        future_map = {executor.submit(recs_for, sid): sid for sid in tasks}
         for future in as_completed(future_map):
-            seed = future_map[future]
             try:
-                _, related = future.result()
+                recs = future.result()
             except Exception:
                 continue
-            if not related:
+            if not recs:
                 continue
-            weight = _weight(seed)
-            for rel in related:
-                try:
-                    rid = tmdb.imdb_id(rel.get("tmdb_id"), tmdb_type)
-                except Exception:
+            for r in recs:
+                rid = r.get("ids", {}).get("simkl")
+                if not rid or rid in watched_simkl:
                     continue
-                if not rid or rid in watched_imdbs:
-                    continue
-                scores[rid] = scores.get(rid, 0) + weight
-                if rid not in details:
-                    details[rid] = {
-                        "title": rel.get("title", ""),
-                        "year": rel.get("year"),
-                        "poster": _poster(rel),
-                        "overview": rel.get("overview", ""),
-                    }
+                counts[rid] = counts.get(rid, 0) + 1
 
-    result = {}
-    for rid, score in scores.items():
-        d = details.get(rid, {})
-        result[rid] = {
-            "score": score,
-            "title": d.get("title", ""),
-            "year": d.get("year"),
-            "poster": d.get("poster", ""),
-            "overview": d.get("overview", ""),
-        }
-    return result
+    return counts
 
 
-def _to_catalog(scored, media_type, limit):
-    sorted_ids = sorted(scored.items(), key=lambda x: (-x[1]["score"], x[0]))[:limit]
-    return [
-        {
-            "id": rid,
+def _to_catalog(counts, media_type, limit):
+    if not counts:
+        return []
+
+    top_ids = sorted(counts.items(), key=lambda x: (-x[1], x[0]))[:limit]
+    top_sids = [sid for sid, _ in top_ids]
+
+    details = {}
+
+    def detail_for(sid):
+        return sid, simkl.detail(media_type, sid)
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_map = {executor.submit(detail_for, sid): sid for sid in top_sids}
+        for future in as_completed(future_map):
+            sid = future_map[future]
+            try:
+                _, d = future.result()
+            except Exception:
+                continue
+            if d and d.get("ids", {}).get("imdb"):
+                details[sid] = d
+
+    items = []
+    for sid, _ in top_ids:
+        d = details.get(sid)
+        if not d:
+            continue
+        items.append({
+            "id": d["ids"]["imdb"],
             "type": media_type,
-            "name": d["title"],
-            "year": d["year"],
-            "poster": d["poster"],
+            "name": d.get("title", ""),
+            "year": d.get("year"),
+            "poster": _simkl_poster(d.get("poster")),
             "posterShape": "regular" if d.get("poster") else None,
-            "overview": d["overview"],
-        }
-        for rid, d in sorted_ids
-    ]
+            "overview": d.get("overview", ""),
+        })
+    return items
 
 
 def recommended_movies(limit=50):
@@ -134,11 +123,12 @@ def recommended_movies(limit=50):
     if cached is not None:
         log.info("Using cached movie catalog (%d items)", len(cached))
         return cached[:limit]
-    scored = _scored_related("movie", simkl.get_watched_movies)
-    if scored:
-        log.info("Using TMDB related-movie scoring (%d candidates)", len(scored))
-        items = _to_catalog(scored, "movie", limit)
-        cache.set(CACHE_KEY_MOVIES, json.dumps(items), CACHE_TTL)
+    counts = _recommendation_counts(simkl.get_watched_movies, "movie")
+    if counts:
+        log.info("Using Simkl users_recommendations (%d candidates)", len(counts))
+        items = _to_catalog(counts, "movie", limit)
+        if items:
+            cache.set(CACHE_KEY_MOVIES, json.dumps(items), CACHE_TTL)
         return items
     return []
 
@@ -148,10 +138,11 @@ def recommended_shows(limit=50):
     if cached is not None:
         log.info("Using cached show catalog (%d items)", len(cached))
         return cached[:limit]
-    scored = _scored_related("tv", simkl.get_watched_shows)
-    if scored:
-        log.info("Using TMDB related-show scoring (%d candidates)", len(scored))
-        items = _to_catalog(scored, "series", limit)
-        cache.set(CACHE_KEY_SHOWS, json.dumps(items), CACHE_TTL)
+    counts = _recommendation_counts(simkl.get_watched_shows, "tv")
+    if counts:
+        log.info("Using Simkl users_recommendations (%d candidates)", len(counts))
+        items = _to_catalog(counts, "series", limit)
+        if items:
+            cache.set(CACHE_KEY_SHOWS, json.dumps(items), CACHE_TTL)
         return items
     return []

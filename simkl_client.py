@@ -67,3 +67,19 @@ def get_watched_shows():
 
 def get_ratings():
     return _api("/sync/ratings", params={"extended": "full"})
+
+def detail(media_type, simkl_id):
+    path = f"/movies/{simkl_id}" if media_type == "movie" else f"/tv/{simkl_id}"
+    try:
+        r = requests.get(
+            f"{API}{path}",
+            params={"client_id": CLIENT_ID},
+            headers={"User-Agent": HEADERS["User-Agent"]},
+            timeout=15,
+        )
+    except requests.exceptions.RequestException:
+        return None
+    if r.status_code != 200:
+        return None
+    data = r.json()
+    return data if isinstance(data, dict) else None
