@@ -85,7 +85,10 @@ def _scored_related(tmdb_type, get_watched):
                 continue
             weight = _weight(seed)
             for rel in related:
-                rid = tmdb.imdb_id(rel.get("tmdb_id"), tmdb_type)
+                try:
+                    rid = tmdb.imdb_id(rel.get("tmdb_id"), tmdb_type)
+                except Exception:
+                    continue
                 if not rid or rid in watched_imdbs:
                     continue
                 scores[rid] = scores.get(rid, 0) + weight
