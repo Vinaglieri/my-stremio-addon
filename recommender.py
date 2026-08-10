@@ -1,9 +1,26 @@
-import simkl_client as simkl
-import tmdb_client as tmdb
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import simkl_client as simkl
+import tmdb_client as tmdb
+import upstash_client as cache
+
 log = logging.getLogger(__name__)
+
+CACHE_TTL = 86400
+CACHE_KEY_MOVIES = "recommender:catalog:movie"
+CACHE_KEY_SHOWS = "recommender:catalog:series"
+
+
+def _get_cached(key):
+    raw = cache.get(key)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
 
 
 def _poster(item):
@@ -23,7 +40,12 @@ def _weight(seed):
 
 
 def _seed_imdb(item):
-    return item.get("ids", {}).get("imdb")
+    if item.get("ids", {}).get("imdb"):
+        return item["ids"]["imdb"]
+    for key in ("movie", "show"):
+        if item.get(key, {}).get("ids", {}).get("imdb"):
+            return item[key]["ids"]["imdb"]
+    return None
 
 
 def _scored_related(tmdb_type, get_watched):
@@ -105,16 +127,28 @@ def _to_catalog(scored, media_type, limit):
 
 
 def recommended_movies(limit=50):
+    cached = _get_cached(CACHE_KEY_MOVIES)
+    if cached is not None:
+        log.info("Using cached movie catalog (%d items)", len(cached))
+        return cached[:limit]
     scored = _scored_related("movie", simkl.get_watched_movies)
     if scored:
         log.info("Using TMDB related-movie scoring (%d candidates)", len(scored))
-        return _to_catalog(scored, "movie", limit)
+        items = _to_catalog(scored, "movie", limit)
+        cache.set(CACHE_KEY_MOVIES, json.dumps(items), CACHE_TTL)
+        return items
     return []
 
 
 def recommended_shows(limit=50):
+    cached = _get_cached(CACHE_KEY_SHOWS)
+    if cached is not None:
+        log.info("Using cached show catalog (%d items)", len(cached))
+        return cached[:limit]
     scored = _scored_related("tv", simkl.get_watched_shows)
     if scored:
         log.info("Using TMDB related-show scoring (%d candidates)", len(scored))
-        return _to_catalog(scored, "series", limit)
+        items = _to_catalog(scored, "series", limit)
+        cache.set(CACHE_KEY_SHOWS, json.dumps(items), CACHE_TTL)
+        return items
     return []
