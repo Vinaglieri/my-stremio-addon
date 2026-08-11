@@ -1,9 +1,8 @@
 import json
 import logging
-import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import recommender
 import simkl_client as simkl
@@ -18,11 +17,16 @@ LAST_RUN_KEY = "sync:last_run"
 STATE_KEY = "sync:synced"
 ACTIVITIES_KEY = "sync:activities_ts"
 
-_lock = threading.Lock()
+MAX_HISTORY_WORKERS = 10
 
 
-def maybe_sync():
-    """Run a background Stremio->Simkl sync + rebuild if due. Non-blocking."""
+def sync_on_open():
+    """Run a Stremio->Simkl sync + rebuild synchronously if due.
+
+    Called from the manifest route (Stremio opening the addon). Runs inline in
+    the request — no background thread, so it always completes on Cloud Run.
+    Throttled to once per SYNC_INTERVAL via Redis lock.
+    """
     if not stremio.is_configured() or not simkl.is_authed():
         return
 
@@ -37,13 +41,21 @@ def maybe_sync():
 
     if not _acquire_lock():
         return
-    threading.Thread(target=_run_sync, daemon=True).start()
+    t0 = time.time()
+    try:
+        _do_sync()
+    except Exception:
+        log.exception("sync failed")
+    finally:
+        cache.set(LAST_RUN_KEY, str(time.time()))
+        _exec_redis("DEL", LOCK_KEY)
+        log.info("sync_on_open finished in %.1fs", time.time() - t0)
 
 
 def _acquire_lock():
     try:
         r = _exec_redis("SET", LOCK_KEY, "1", "EX", str(SYNC_INTERVAL), "NX")
-        return r is True
+        return r == "OK"
     except Exception:
         return False
 
@@ -61,17 +73,6 @@ def _exec_redis(*args):
     )
     data = r.json()
     return data.get("result")
-
-
-def _run_sync():
-    with _lock:
-        try:
-            _do_sync()
-        except Exception:
-            log.exception("background sync failed")
-        finally:
-            cache.set(LAST_RUN_KEY, str(time.time()))
-            _exec_redis("DEL", LOCK_KEY)
 
 
 def _do_sync():
@@ -168,8 +169,29 @@ def _sync_history(movies, series, state):
         else:
             log.warning("Simkl movie sync failed: %r", result)
 
+    if not series:
+        return
+
+    # Fetch Cinemeta episode lists for all series in parallel (this was the
+    # slow sequential phase that stalled the old background thread).
+    def fetch_videos(imdb_id):
+        return imdb_id, stremio.get_cinemeta_episodes(imdb_id)
+
+    fetched = {}
+    with ThreadPoolExecutor(max_workers=MAX_HISTORY_WORKERS) as executor:
+        future_map = {
+            executor.submit(fetch_videos, imdb_id): imdb_id
+            for imdb_id in series
+        }
+        for future in as_completed(future_map):
+            try:
+                imdb_id, videos = future.result()
+                fetched[imdb_id] = videos
+            except Exception:
+                continue
+
     for imdb_id, s in series.items():
-        cinemeta_videos = stremio.get_cinemeta_episodes(imdb_id)
+        cinemeta_videos = fetched.get(imdb_id)
         if not cinemeta_videos:
             continue
         episodes = stremio.map_bitfield_to_episodes(imdb_id, s["watched"], cinemeta_videos)

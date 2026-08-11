@@ -33,6 +33,7 @@ def root():
 
 @app.get("/manifest.json")
 def manifest():
+    sync_engine.sync_on_open()
     tk = simkl.is_authed()
     catalogs = [
         {"type": "movie", "id": "vinaglieri-recommended", "name": "Recommended for You"},
@@ -85,7 +86,6 @@ def simkl_callback():
 
 @app.get("/catalog/<stype>/<cid>.json")
 def catalog(stype, cid):
-    sync_engine.maybe_sync()
     if cid == "vinaglieri-recommended":
         items = recommender.recommended_movies(50)
     elif cid == "vinaglieri-recommended-shows":
